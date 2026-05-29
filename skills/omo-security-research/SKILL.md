@@ -3,6 +3,8 @@ name: omo-security-research
 description: Team Mode security audit with 3 vulnerability hunters and 2 PoC engineers. Performs surface-mapping, auth/data/injection analysis, runtime/supply-chain analysis, then independently builds and falsifies PoCs. Severity-calibrated by actual exploitability. Triggers: security audit, pen test, vulnerability hunt, exploitability audit, security review, pre-release security check, threat model validation, /omo-security-research
 argument-hint: '"<scope: paths or feature to audit>"'
 allowed-tools: Task Bash Read Write Edit Glob Grep WebFetch WebSearch AskUserQuestion TaskCreate TaskUpdate TaskList
+model: opus
+effort: xhigh
 ---
 
 # Security Research — Team-Mode Vulnerability Audit
@@ -10,6 +12,18 @@ allowed-tools: Task Bash Read Write Edit Glob Grep WebFetch WebSearch AskUserQue
 Run a parallel security audit that separates **real exploitability** from generic concern. The team has 3 vulnerability hunters and 2 PoC engineers, all running as parallel Claude Code subagents (no team-mode runtime — fan-out via parallel `Task` calls).
 
 **MANDATORY first line of your response**: `SECURITY RESEARCH MODE ENGAGED.` exactly once.
+
+---
+
+## Pairing with Dynamic Workflows
+
+If Dynamic Workflows are enabled (Claude Code 2.1.154+, research preview), security-research is a strong workflow candidate — the 3-hunter / 2-PoC fan-out + cross-check phase + falsification round map cleanly onto a JS orchestration script:
+
+- Include the word `workflow` in the user request: `/omo-security-research "<scope>" — run as workflow`. The runtime spawns hunters and PoC engineers in parallel, holds intermediate findings in script state (no Claude-context pollution), and surfaces only the final report.
+- After a successful run, `/workflows` → press `s` to save as `~/.claude/workflows/omo-security-research-dw.js`. Re-run on every release candidate.
+- The opinion layer survives intact in the saved script: "no severity without an attack path", "never run destructive exploits", CWE/OWASP/CVSS standard references, Engineer B's falsification mandate.
+
+DW concurrency caps (16 concurrent / 1000 total) don't bind here — security-research runs at most ~10 agents.
 
 ---
 

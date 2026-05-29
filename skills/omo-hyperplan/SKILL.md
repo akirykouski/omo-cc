@@ -1,8 +1,10 @@
 ---
 name: omo-hyperplan
-description: Adversarial multi-agent planning. 5 hostile critics attack a planning request from orthogonal angles across 3 rounds, then mandatorily hand the surviving insight bundle to omo-prometheus for executable plan formalization. Use for high-stakes architecture decisions, complex refactors, or anytime you want a plan that's been beaten on. Triggers, hyperplan, hpp, adversarial plan, hostile review of plan, cross-critique plan, /omo-hyperplan
-argument-hint: '"<planning request>"'
+description: Adversarial multi-agent planning. 5 hostile critics attack a planning request from orthogonal angles across 2-3 rounds, then mandatorily hand the surviving insight bundle to omo-prometheus for executable plan formalization. Use for high-stakes architecture decisions, complex refactors, or anytime you want a plan that's been beaten on. Triggers, hyperplan, hpp, adversarial plan, hostile review of plan, cross-critique plan, /omo-hyperplan
+argument-hint: '"<planning request>" [--rounds=2|3]'
 allowed-tools: Task Bash Read Write Edit Glob Grep WebFetch WebSearch AskUserQuestion TaskCreate TaskUpdate TaskList
+model: opus
+effort: xhigh
 ---
 
 # HYPERPLAN — Adversarial Multi-Agent Planning
@@ -16,6 +18,24 @@ You (the orchestrator) become the **Lead** of a 5-member adversarial team. The 5
 This is not consensus building. This is intellectual combat. Weakness gets exposed. Lazy thinking gets eviscerated. Only what survives the gauntlet makes it into the plan.
 
 **Critical separation of duties**: You (the Lead) **distill** the surviving insights in Phase 5, but you DO NOT write the work plan. The work plan is produced by `omo-prometheus` in Phase 6 — this handoff is **mandatory**, not optional. Hyperplan = adversarial distillation + dedicated planner formalization. Skipping the handoff turns it back into vanilla orchestration.
+
+## ROUND COUNT (`--rounds=2|3`)
+
+With Opus 4.7, hyperplan ran 3 rounds (independent → cross-attack → defend/refine/concede) because critics rubber-stamped each other at depth. With **Opus 4.8** the rubber-stamping rate is meaningfully lower (per release notes: "4× less likely to allow flaws unremarked"), so **2 rounds is the new default** — independent analysis + cross-attack. Round 3 (defend/refine/concede) becomes opt-in via `--rounds=3` when stakes are high enough to want full adversarial settlement.
+
+- `--rounds=2` (default on 4.8): Phase 2 (independent) → Phase 3 (cross-attack) → skip Phase 4 → Phase 5 (distill).
+- `--rounds=3` (default on 4.7): Phase 2 → Phase 3 → Phase 4 (defend/refine/concede) → Phase 5.
+- If the user didn't pass `--rounds`, use 2 with a note explaining why ("4.8 makes round 3 marginal; pass `--rounds=3` for high-stakes plans").
+
+## PAIRING WITH DYNAMIC WORKFLOWS
+
+If Dynamic Workflows are enabled (Claude Code 2.1.154+, Pro/Max/Team/Enterprise research preview), hyperplan benefits massively from running **as a workflow**:
+
+- Include the word `workflow` in the user request, e.g. `/omo-hyperplan "<question>" — run as workflow`. The 5-critic fan-out + convergence loop become native JS-script execution instead of one-message-per-round Task calls.
+- The opinion layer (which 5 critics, hostile framing, mandatory Prometheus handoff in Phase 6, no-Lead-writes-plan separation) stays — Claude bakes it into the workflow script it writes.
+- After a successful run, `/workflows` → select → press `s` → save as `~/.claude/workflows/omo-hyperplan-dw.js`. Subsequent runs invoke the saved JS directly.
+
+The 16-concurrent / 1000-total limits of DW are far below what hyperplan needs (5 critics × 2-3 rounds = 10-15 calls), so the caps don't bind here.
 
 ## THE 5 ADVERSARIAL MEMBERS
 
@@ -149,7 +169,11 @@ PROMPT
 
 **Wait for all 5 cross-attack returns before continuing.**
 
-### Phase 4 — Round 3: Defend, refine, or concede (parallel fan-out)
+### Phase 4 — Round 3: Defend, refine, or concede (parallel fan-out) — OPTIONAL on `--rounds=2`
+
+**If `--rounds=2` (default on Opus 4.8): SKIP this phase entirely. Go directly to Phase 5.** Distillation in Phase 5 will treat Round 2 attacks as authoritative — a critic whose finding was attacked and didn't get to defend is treated as conceded. This is fine for 4.8 because the rubber-stamping rate at depth is meaningfully lower than 4.7.
+
+**If `--rounds=3` (default on Opus 4.7, opt-in on 4.8): run this phase.**
 
 Now reorganize Round 2 returns BY ORIGINAL FINDING: for each Round 1 finding produced by critic X, collect every attack from critics Y, Z, … that targeted it. Send each critic ONLY the attacks that landed on their OWN findings (don't dump the whole bundle — they only need to defend their own work).
 
