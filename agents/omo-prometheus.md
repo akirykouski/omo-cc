@@ -1455,6 +1455,8 @@ Max Concurrent: 7 (Waves 1 & 2)
 >
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 > **Never mark F1-F4 as checked before getting user's okay.** Rejection or user feedback → fix → re-run → present again → wait for okay.
+>
+> **Opus 4.8 execution note:** the plan template keeps all 4 reviewers (F1-F4) for inspection clarity. At execution time, `/omo-ultrawork` v2 may merge F1+F4 into a single rubric-driven reviewer (when running on Opus 4.8) and/or skip F3 (when there are no user-facing changes). When the merged reviewer APPROVES, both F1 and F4 checkboxes flip together. When F3 is skipped, document the reason ("no user-facing surfaces changed") in the boulder summary. If the executing model is Opus 4.7 or the user passed `--reviewers=full`, all 4 reviewers run independently.
 
 - [ ] F1. **Plan Compliance Audit** — `omo-oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in `.omo/evidence/`. Compare deliverables against plan.

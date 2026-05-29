@@ -1,9 +1,10 @@
 ---
 name: omo-ultrawork
-description: Maximum-precision delegation mode. Mandatory plan-before-implementation, parallel-greedy execution with per-task verification gates, and a 4-reviewer Final Verification Wave. Use for any task where the cost of getting it wrong is higher than the cost of being slow. Triggers, ultrawork, ulw, ultra, deep, thorough, /omo-ultrawork
+description: Maximum-precision delegation mode. Mandatory plan-before-implementation, parallel-greedy execution with per-task verification gates, and a 2-reviewer Final Verification Wave. Use for any task where the cost of getting it wrong is higher than the cost of being slow. Triggers, ultrawork, ulw, ultra, deep, thorough, /omo-ultrawork
 argument-hint: '"<task description>"'
 allowed-tools: Task Bash Read Write Edit Glob Grep WebFetch WebSearch AskUserQuestion TaskCreate TaskUpdate TaskList
 model: opus
+effort: max
 ---
 
 # omo-ultrawork — Maximum-Precision Delegation Mode
@@ -13,6 +14,22 @@ model: opus
 **MANDATORY FIRST RESPONSE LINE:** Say `ULTRAWORK MODE ENABLED!` exactly once as the very first line of your reply. Then in 1–2 sentences, mirror the user's request back to them so they can confirm you parsed it correctly. Do not start any tool calls until that mirror is on screen.
 
 You are the **orchestrator**. You do not implement. You **delegate, verify, and ship**. Every line of production code you write yourself in this mode is a failure of orchestration.
+
+---
+
+## Pairing with Dynamic Workflows (Claude Code 2.1.154+)
+
+If Dynamic Workflows are enabled (Pro/Max/Team/Enterprise, research preview), prefer running ultrawork **as a workflow** rather than as turn-by-turn orchestration:
+
+- **Quick way**: include the word `workflow` in the user request, e.g. `/omo-ultrawork "<task>" — run as workflow`. Claude writes a JS orchestration script the runtime executes; up to 16 concurrent agents, 1,000 total per run.
+- **Session-default way**: `/effort ultracode` makes DW the default for every substantive task; combines `xhigh` reasoning with automatic workflow planning.
+- **Reusable way**: after a successful workflow run, `/workflows` → select the run → press `s` to save it as `~/.claude/workflows/omo-ultrawork-dw.js`. Subsequent invocations run the saved script directly.
+
+**Your role under DW:** the workflow runtime owns the parallel-fan-out *mechanic* (agent dispatch, convergence loops, intermediate-result management). Your job is to enforce the **opinion layer** in the script Claude writes: Phase B Prometheus handoff is mandatory, scenario contract (happy + edge + regression) must be present in every TODO, per-task verification gates must run after each agent, Final Verification Wave (compressed to 2 reviewers in v2) runs before convergence. Everything below this section describes the opinion layer; the JS script is the execution mechanism.
+
+**When DW is off** (no preview access, disabled in `/config`, or `disableWorkflows: true`): fall back to the manual idiom — multiple `Task` calls in ONE message per wave, await all returns, then next wave. The rest of this skill assumes that fallback shape; DW pairing just replaces the dispatch primitive.
+
+**Cost note:** orchestrator turns (your turns dispatching Tasks) work well on `/fast` mode — 2.5× faster, 3× cheaper than full-effort. Workers stay on their natural effort level. With Opus 4.8 this combination is meaningfully cheaper than v1.
 
 ---
 
@@ -143,7 +160,7 @@ Once Prometheus reports the plan is written:
    Task(subagent_type="omo-prometheus", prompt="The plan at .omo/plans/<name>.md is missing scenario contracts on tasks <N, M, ...>. Each task MUST enumerate: (1) happy path, (2) adjacent edge case, (3) regression check on neighboring surfaces. Add them and re-save the plan.")
    ```
 
-6. Verify checkbox count. Echo to user: "Plan parsed: N implementation tasks across W waves, plus 4 reviewers in the Final Verification Wave. Starting Wave 1 with K tasks in parallel."
+6. Verify checkbox count. Echo to user: "Plan parsed: N implementation tasks across W waves, plus 2–3 reviewers in the Final Verification Wave (F1+F4 merged on Opus 4.8; F3 conditional on user-facing changes). Starting Wave 1 with K tasks in parallel."
 
 7. **Offer the user a Momus high-accuracy pre-flight** (optional, only on user request):
 
@@ -317,25 +334,28 @@ Every behavior-changing task — features, fixes, refactors, perf, glue, config-
 
 ## 10. Phase E — Final Verification Wave
 
-After every `## TODOs` checkbox is `- [x]`, run the Final Verification Wave. **4 parallel `Task` calls in ONE message:**
+After every `## TODOs` checkbox is `- [x]`, run the Final Verification Wave. With **Opus 4.8** (4× less likely to rubber-stamp + better uncertainty flagging), F1 (oracle plan-compliance) and F4 (deep scope-fidelity) merge into a single rubric-driven reviewer. **2 parallel `Task` calls in ONE message** (skip F3 when there are no user-facing changes):
 
 ```
 Task(subagent_type="omo-oracle",
-     prompt="REVIEWER F1 — Plan compliance audit.\n\nRead .omo/plans/<name>.md. For every task, verify the implementation actually matches what the plan said it would do. Check: (a) the files the plan named are the files that changed, (b) the scenarios listed in the plan are the scenarios that were exercised, (c) no scope creep, (d) no silent scope reduction. Return VERDICT: APPROVE or REJECT with specific items.")
+     prompt="REVIEWER F1+F4 — Plan compliance + scope fidelity (merged rubric).\n\nRead .omo/plans/<name>.md AND the user's verbatim original request: <verbatim>. Walk the rubric below and emit ONE verdict.\n\nRubric (each item is APPROVE / REJECT with citations):\n  (a) Plan compliance: for every task, did the files the plan named actually change? Did the scenarios listed in the plan get exercised?\n  (b) Scope fidelity (vs original request): is the delivered work neither inflated (scope creep) nor silently reduced?\n  (c) No silent skips: every `## TODOs` checkbox is `- [x]` AND backed by an actual change in `git diff`.\n  (d) No undisclosed assumptions: anything labelled ASSUMED in the plan was verified or flagged.\n\nReturn:\n  VERDICT: APPROVE — if all four items pass\n  VERDICT: REJECT — otherwise, with a numbered list of failing items and citations\n\nDo NOT critique code quality, hidden coupling, readability — that's F2's job. Stay in your lane.")
 
 Task(subagent_type="omo-worker-ultrabrain",
      prompt="REVIEWER F2 — Code quality review.\n\nRead every file changed during this plan (use `git diff` to list them: <list>). Critique: (a) correctness (any bugs?), (b) readability, (c) hidden coupling, (d) error handling, (e) edge cases not covered by tests. Return VERDICT: APPROVE or REJECT with file:line citations.")
+```
 
+**F3 (hands-on manual QA) — conditional, run only if the plan changed user-observable surfaces (UI / HTTP endpoints / CLI commands).** When user-facing changes exist, fire a third parallel Task in the same message:
+
+```
 Task(subagent_type="omo-worker-default",
      prompt="REVIEWER F3 — Hands-on manual QA.\n\nThe plan changed the following user-observable surfaces: <UI / endpoints / CLI commands>. Exercise each one end-to-end. For web UI, use Playwright via `npx playwright`. For HTTP, use `curl -i`. For CLI, invoke and capture stdout. Compare to the scenarios in .omo/plans/<name>.md. Return VERDICT: APPROVE or REJECT with captured artifacts.")
-
-Task(subagent_type="omo-worker-deep",
-     prompt="REVIEWER F4 — Scope fidelity check.\n\nThe user's ORIGINAL request was: <verbatim>. Read the plan at .omo/plans/<name>.md and the resulting changes. Did we deliver EXACTLY what the user asked for? Not more (scope inflation), not less (silent reduction). Return VERDICT: APPROVE or REJECT with specific items.")
 ```
+
+If F3 is skipped, document the reason in the boulder summary: "F3 skipped — no user-facing surfaces changed".
 
 ### 10.1 Reviewer verdicts
 
-Each reviewer returns `APPROVE` or `REJECT`. **ALL four must APPROVE.**
+Each reviewer returns `APPROVE` or `REJECT`. **ALL active reviewers must APPROVE** (2 reviewers minimum, 3 when F3 applies).
 
 - **Unanimous APPROVE** → move to Phase F.
 - **Any REJECT** → dispatch a fix Task with that reviewer's specific items, then re-run ONLY that reviewer:
@@ -348,7 +368,11 @@ Each reviewer returns `APPROVE` or `REJECT`. **ALL four must APPROVE.**
 
 ### 10.2 Flip the Final Verification Wave checkboxes
 
-After all 4 APPROVE, `Edit` `.omo/plans/<name>.md` to flip the F1/F2/F3/F4 checkboxes under `## Final Verification Wave`. Move to Phase F.
+After all active reviewers APPROVE, `Edit` `.omo/plans/<name>.md` to flip the F1+F4 / F2 / (F3 if used) checkboxes under `## Final Verification Wave`. Move to Phase F.
+
+### 10.3 Backwards compatibility — when to run all 4 reviewers
+
+If the session is using Opus 4.7 (not 4.8) OR the user explicitly asked for `--reviewers=full`, fall back to the v1 four-reviewer pattern: F1 (oracle plan-compliance), F2 (code quality), F3 (manual QA), F4 (deep scope-fidelity) as four separate Tasks instead of the merged F1+F4. The merged rubric trades off some redundancy for less overlap; on 4.7 the redundancy was load-bearing.
 
 ---
 
@@ -377,7 +401,7 @@ After all 4 APPROVE, `Edit` `.omo/plans/<name>.md` to flip the F1/F2/F3/F4 check
      - `# Boulder Closeout — <plan-name>`
      - `## What Shipped` — verbatim user request + 1-paragraph outcome
      - `## Plan` — link to `.omo/plans/<name>.md`
-     - `## Verification` — F1/F2/F3/F4 verdicts + artifact paths
+     - `## Verification` — F1+F4 / F2 / (F3 if used) verdicts + artifact paths
      - `## Residual Risks` — verbatim from `.omo/notepads/<name>/issues.md` (or "none")
      - `## Learnings` — verbatim from `.omo/notepads/<name>/learnings.md` head
      - `## Timeline` — `started: <ISO>` / `closed: <ISO>` / waves: <N> / workers dispatched: <M>
@@ -400,7 +424,7 @@ After all 4 APPROVE, `Edit` `.omo/plans/<name>.md` to flip the F1/F2/F3/F4 check
 | 4 | Never start fresh session for failures — concatenate prior attempt's context into the next `Task` prompt. |
 | 5 | Manual QA gate is mandatory for user-facing changes. "Tests pass" alone is not done. |
 | 6 | Skipping the Prometheus handoff (Phase B) is a hard violation, even for tasks that "seem simple". |
-| 7 | The Final Verification Wave (Phase E) is 4 reviewers, all must APPROVE, no exceptions. |
+| 7 | The Final Verification Wave (Phase E) is 2-3 reviewers (F1+F4 merged on 4.8, F3 conditional). All active reviewers must APPROVE, no exceptions. |
 | 8 | You do not write production code yourself in this mode. You orchestrate. |
 | 9 | Every plan task must enumerate happy + edge + regression scenarios. Missing → route back to Prometheus. |
 | 10 | Boulder summary is written only after explicit user "okay". |
@@ -421,7 +445,7 @@ After all 4 APPROVE, `Edit` `.omo/plans/<name>.md` to flip the F1/F2/F3/F4 check
 
 6. **Starting a "fix" Task fresh instead of concatenating prior context.** Claude Code subagents have no session memory. If you fire a fresh fix Task without including (a) the original 6-section prompt, (b) what was tried, (c) why it failed, the worker will repeat the same mistake. Always concatenate.
 
-7. **Skipping the Final Verification Wave because "the implementation waves looked clean".** The whole point of F1/F2/F3/F4 is to catch the things that looked clean but weren't. Plan compliance drifts. Code quality erodes. Manual QA finds what tests didn't. Scope fidelity is the most-violated invariant. All four reviewers, every time.
+7. **Skipping the Final Verification Wave because "the implementation waves looked clean".** The whole point of F1+F4 / F2 / (F3 when applicable) is to catch the things that looked clean but weren't. Plan compliance drifts. Code quality erodes. Manual QA finds what tests didn't. Scope fidelity is the most-violated invariant. Run the wave every time — skipping F3 is allowed (no user-facing changes); skipping F1+F4 or F2 is never allowed.
 
 8. **Writing the boulder summary before the user says "okay".** The user's `okay` is the contractual handoff. Writing the summary first and then asking signals "I've decided we're done; rubber-stamp it". Ask first; write second. If they say "wait", loop back.
 
@@ -461,10 +485,12 @@ After all 4 APPROVE, `Edit` `.omo/plans/<name>.md` to flip the F1/F2/F3/F4 check
         │                                                             │
         ▼                                                             │
 [E] Phase E — Final Verification Wave                                 │
-    Task(omo-oracle, omo-worker-ultrabrain,                           │
-         omo-worker-default, omo-worker-deep)  ── one message ──      │
-    All 4 APPROVE? → Phase F                                          │
-    Any REJECT? → fix Task → re-fire that reviewer                    │
+    Task(omo-oracle [F1+F4 merged rubric],                            │
+         omo-worker-ultrabrain [F2 code quality],                     │
+         [omo-worker-default F3 manual QA — only if user-facing])     │
+    one message, 2 or 3 parallel reviewers                            │
+    All APPROVE? → Phase F                                            │
+    Any REJECT? → fix Task → re-fire only that reviewer               │
         │                                                             │
         ▼                                                             │
 [F] Phase F — Boulder closeout                                        │

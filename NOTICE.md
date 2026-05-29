@@ -10,7 +10,8 @@ Specifically:
 - **Subagent invocations** rewritten from opencode's `task(subagent_type="X", category="Y", load_skills=[...], run_in_background=Z)` shape to Claude Code's `Task(subagent_type="omo-X", prompt="...")` shape.
 - **Team mode** (`team_create`, `team_send_message`, `team_*` family) simulated via parallel `Task` fan-out, since Claude Code has no equivalent runtime.
 - **Multi-model gateway routing** (Kimi K2.6, GPT-5.5, GLM, Gemini, …) collapsed to Claude-only model assignment (Haiku/Sonnet/Opus) via worker-agent variants.
-- **Session continuity** (`task_id="ses_..."` re-dispatch) dropped — Claude Code subagents don't preserve context across calls. Orchestrators now concatenate prior-turn findings into each new prompt.
+- **Session continuity** (`task_id="ses_..."` re-dispatch) dropped — Claude Code subagents don't preserve context across calls. Orchestrators concatenate prior-turn findings into each new prompt. With Opus 4.8's prompt caching + the [Messages API mid-task system entries](https://support.claude.com/en/articles/12138966-release-notes), the token cost of this workaround is roughly comparable to upstream's session-resume idiom.
+- **Native multi-agent orchestration via [Dynamic Workflows](https://code.claude.com/docs/en/workflows)** (Claude Code 2.1.154+, research preview): omo-cc skills detect DW availability and recommend the workflow path; the omo opinion layer (mandatory Prometheus interview, scenario contract, hostile-critic rounds, verification gates) runs inside the JS orchestration script Claude writes.
 - **Hashline edit tool, LSP MCPs, AST-grep MCPs, tmux visualization** — not ported (these are runtime / harness pieces). Skill prompts fall back to Claude Code's native tools (`Edit` with anchored matching, `Grep`/`Read`, `Bash` typecheck).
 - All `omo-*` names prefixed to namespace the install under `~/.claude/skills/omo-*/` and `~/.claude/agents/omo-*.md`.
 

@@ -9,6 +9,31 @@ allowed-tools: Task Bash Read Write Edit Glob Grep AskUserQuestion TaskCreate Ta
 
 > **MANDATORY**: First line of your response, exactly: `RALPH LOOP ENGAGED.` (or `ULTRAWORK LOOP ENGAGED.` if the `--ultrawork` flag was passed). No preamble before that line.
 
+## DEPRECATION NOTE — Dynamic Workflows supersede this for most use cases
+
+**With Dynamic Workflows enabled** (Claude Code 2.1.154+, research preview), the convergence-loop pattern this skill provides is **native**: workflows iterate until results converge or the agent budget is exhausted, all in a JS runtime that holds intermediate state off Claude's context. For typical use cases — "drive task X to truly-done" — prefer:
+
+```
+/omo-ultrawork "<task>" — run as workflow
+```
+
+or (session-default):
+
+```
+/effort ultracode
+```
+
+over `/omo-ralph-loop` going forward. The workflow runtime gives you 1000-agent budget, resumability within the session, and pause/resume from `/workflows`.
+
+**This skill remains useful for:**
+
+- **Non-DW environments**: when Dynamic Workflows are unavailable (older Claude Code, free tier, `disableWorkflows: true`, no preview access).
+- **Cross-session long-horizon loops**: DW runs are scoped to a single session. If you need a task to span multiple sessions (e.g., "every Monday morning re-check this"), pair this skill with `/loop` and let it persist via `.omo/ralph-loop.local.md` across restarts.
+- **Explicit promise-token control**: when you want a hard, agent-emitted exit condition (`<promise>DONE</promise>`) rather than DW's convergence heuristic.
+- **Ultrawork loop with Oracle gate**: this skill's `--ultrawork` flag adds an explicit Oracle verification step that DW doesn't enforce automatically.
+
+If you're inside a DW-enabled session and don't have a cross-session or Oracle-gate need, use a workflow instead.
+
 ## Why Ralph Loop?
 
 Named after the Ralph Wiggum-esque pattern of self-referential prompting — "I'm helping" → "I'm still helping" → "I'm still helping" — this skill drives a task to truly-done by re-prompting on every continuation token. Use it when you want a task to grind to completion without manual prodding, when partial credit is unacceptable, or when you want the agent to keep trying alternative approaches until something works. The exit token is `<promise>DONE</promise>` (or whatever you configure). Until that token fires, the loop continues.

@@ -43,7 +43,7 @@ That launches the full omo workflow:
 3. Prometheus writes a plan to `.omo/plans/<name>.md` with parallel-execution waves, per-task acceptance criteria, and QA scenarios.
 4. Sisyphus executes waves in parallel via worker agents (`omo-worker-quick`, `-deep`, `-ultrabrain`, `-visual`, `-artistry`, `-default`).
 5. Per-task verification: typecheck + read every changed file + hands-on QA for user-facing changes.
-6. Final Verification Wave: 4 parallel reviewers (`omo-oracle`, `omo-worker-ultrabrain`, `omo-worker-default`, `omo-worker-deep`). All must approve.
+6. Final Verification Wave: 2–3 parallel reviewers (`omo-oracle` runs a merged plan-compliance + scope-fidelity rubric; `omo-worker-ultrabrain` does code quality; `omo-worker-default` does manual QA when user-facing surfaces changed). All must approve.
 7. Boulder closeout at `.omo/boulders/<ts>/summary.md`.
 
 For lower-stakes work, you can call sub-skills directly:
@@ -56,6 +56,29 @@ For lower-stakes work, you can call sub-skills directly:
 /omo-ralph-loop "rename foo to bar across all .ts files"
 /omo-start-work my-plan-name --worktree ../my-worktree
 ```
+
+## Pairing with Dynamic Workflows (Claude Code 2.1.154+)
+
+omo-cc plays well with Anthropic's [Dynamic Workflows](https://code.claude.com/docs/en/workflows) (research preview, Pro/Max/Team/Enterprise). DW gives you a JavaScript runtime that orchestrates up to **16 concurrent / 1000 total** subagents per run, holds intermediate results off Claude's context, and is resumable within a session.
+
+omo-cc's opinionated skills work either with or without DW:
+
+- **Off (default for v1 of Claude Code, or if you disable it)**: skills run as turn-by-turn orchestration — multiple `Task` calls per message, you watch the transcript scroll. This is what you get out of the box.
+- **On**: include the word `workflow` in your request, e.g. `/omo-ultrawork "<task>" — run as workflow`. Claude writes a JS orchestration script for the run, the runtime executes it in the background, you get a single final report. After a successful run, `/workflows` → press `s` to save as a reusable command.
+- **Session-default**: `/effort ultracode` combines `xhigh` reasoning effort with automatic workflow planning — DW becomes the default for every substantive task in the session.
+
+The omo *opinion layer* (mandatory Prometheus interview, scenario contract, hostile-critic rounds, severity-calibrated security audit, Final Verification Wave) survives intact in the workflow script Claude writes. DW just replaces the manual "N Task calls per wave" dispatch with native parallel orchestration. For 4.8 + DW, expect meaningfully shorter wall-clock time and a cleaner context.
+
+**Optimizing token cost:** orchestrator turns work well on `/fast` mode — 2.5× faster, 3× cheaper than full-effort. Workers stay on their natural effort level. With Opus 4.8 this combination is the recommended default.
+
+## Opus 4.8 alignment (v2 changes)
+
+The skill prompts in v2 are tuned for Claude Opus 4.8:
+
+- **Effort hints in frontmatter**: `omo-ultrawork` sets `effort: max`, `omo-hyperplan` and `omo-security-research` set `effort: xhigh`. Use `/fast` for orchestrator turns when you want the cheap path.
+- **2-reviewer Final Verification Wave (was 4)**: Opus 4.8 is 4× less likely to allow flaws unremarked, so F1 (plan compliance) and F4 (scope fidelity) merge into a single rubric-driven Oracle reviewer. F3 (manual QA) is now conditional on user-facing changes. F2 (code quality) always runs. Pass `--reviewers=full` to revert to v1's 4-reviewer wave (recommended on 4.7).
+- **Hyperplan defaults to 2 rounds**: with less rubber-stamping at depth, Round 3 (defend/refine/concede) is opt-in via `--rounds=3`. Default is Round 1 (independent) + Round 2 (cross-attack), then distill.
+- **`omo-ralph-loop` is now a fallback** for non-DW environments or cross-session long-horizon loops. When DW is enabled, prefer `/omo-ultrawork "<task>" — run as workflow` over ralph-loop for the convergence-loop use case.
 
 ## What ships
 
