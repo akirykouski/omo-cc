@@ -1,7 +1,7 @@
 ---
 name: omo-ultrawork
-description: Maximum-precision delegation mode. Mandatory plan-before-implementation, parallel-greedy execution with per-task verification gates, and a 2-reviewer Final Verification Wave. Use for any task where the cost of getting it wrong is higher than the cost of being slow. Triggers, ultrawork, ulw, ultra, deep, thorough, /omo-ultrawork
-argument-hint: '"<task description>"'
+description: Maximum-precision delegation umbrella. Auto-routes through init-deep (if no CLAUDE.md), hyperplan (architectural requests), Prometheus planning, parallel-wave execution, security-research (when diff touches sensitive paths), AI-slop cleanup, and a 2-3 reviewer Final Verification Wave. Use for any task where the cost of getting it wrong is higher than the cost of being slow. Triggers, ultrawork, ulw, ultra, deep, thorough, /omo-ultrawork
+argument-hint: '"<task>" [--minimal] [--no-init-deep] [--no-hyperplan] [--no-security] [--no-slop-check] [--loop] [--rounds=2|3] [--reviewers=full]'
 allowed-tools: Task Bash Read Write Edit Glob Grep WebFetch WebSearch AskUserQuestion TaskCreate TaskUpdate TaskList
 model: opus
 effort: max
@@ -30,6 +30,47 @@ If Dynamic Workflows are enabled (Pro/Max/Team/Enterprise, research preview), pr
 **When DW is off** (no preview access, disabled in `/config`, or `disableWorkflows: true`): fall back to the manual idiom — multiple `Task` calls in ONE message per wave, await all returns, then next wave. The rest of this skill assumes that fallback shape; DW pairing just replaces the dispatch primitive.
 
 **Cost note:** orchestrator turns (your turns dispatching Tasks) work well on `/fast` mode — 2.5× faster, 3× cheaper than full-effort. Workers stay on their natural effort level. With Opus 4.8 this combination is meaningfully cheaper than v1.
+
+---
+
+## Auto-Routing Manifest (v2 umbrella)
+
+ultrawork is the **umbrella workflow**. By default it auto-routes through every relevant omo skill based on the request and the diff. The user can override every routing decision with flags.
+
+**Default ON (auto-detect, opt-out via flag):**
+
+| Phase | Trigger | Sub-skill engaged | Opt-out flag |
+|---|---|---|---|
+| A0 | No `CLAUDE.md` at project root (or only an upstream `AGENTS.md`) | Init-deep discipline inlined — 6 parallel `omo-explore` agents → score → write CLAUDE.md tree | `--no-init-deep` |
+| A2 | Request mentions architecture/design/migrate/refactor/strategy/approach/trade-off/"should we"/"pick between" OR Phase A research reveals >3 high-impact subsystems | Hyperplan inlined — 5 hostile critics × 2 rounds → distilled bundle → Prometheus | `--no-hyperplan` |
+| D5 | Post-implementation diff matches `**/auth/**`, `**/api/**`, `**/middleware/**`, `**/rls/**`, `**/policies/**`, `**/.env*`, `**/secrets/**`, `**/crypto/**`, `**/users/**`, `**/sessions/**`, `**/login/**`, `**/signup/**`, `**/jwt/**`, `**/oauth/**`, `**/cors*`, `**/csrf*` OR Prometheus's plan flagged security | Security-research inlined — 3 hunters + 2 PoC engineers → severity-calibrated report | `--no-security` |
+| D7 | Always (changed files in the boulder) | Slop cleanup inlined — per-file parallel `omo-worker-quick` with `omo-remove-ai-slops` discipline | `--no-slop-check` |
+
+**Default OFF (opt-in via flag):**
+
+| Phase | Trigger | Sub-skill engaged | Opt-in flag |
+|---|---|---|---|
+| D-wrap | User wants automatic re-attempt on stalled execution | Ralph-loop wraps Phase D with max-iteration cap (default 10), exits on `<promise>WAVE_COMPLETE</promise>` | `--loop` |
+
+**Master switches:**
+
+- `--minimal` → disables all auto-routing. Run as v1 backbone only: A → B → C → D → E → F. No init-deep, no hyperplan, no security-research, no slop-check, no loop wrap. Useful when you know the request is simple and you just want the discipline.
+- `--reviewers=full` → restores v1's 4-reviewer Final Verification Wave (F1/F2/F3/F4 as separate Tasks) instead of v2's merged F1+F4 + F2 + conditional F3. Recommended on Opus 4.7.
+- `--rounds=3` → forwarded to hyperplan if engaged. Forces 3-round adversarial structure (independent → cross-attack → defend/refine). Default on 4.8 is 2 rounds.
+
+**Routing announcement (mandatory):** after Phase 0 acknowledge but BEFORE Phase A0, emit a "Routing decision" block listing which sub-skills will engage and why. Format:
+
+```
+ROUTING DECISION
+- Init-deep:       [ENGAGED — no CLAUDE.md at root]   OR   [SKIPPED — CLAUDE.md present]   OR   [DISABLED — --no-init-deep]
+- Hyperplan:       [ENGAGED — request mentions "architecture"]  OR  [SKIPPED — no architectural triggers]  OR  [DISABLED — --no-hyperplan]
+- Security:        [PENDING — will check diff after Phase D]  OR  [DISABLED — --no-security]
+- Slop cleanup:    [ENGAGED — runs before E]  OR  [DISABLED — --no-slop-check]
+- Loop wrap:       [ENGAGED — --loop]  OR  [DISABLED — default]
+- Reviewers:       [2-3 merged (4.8 default)]  OR  [4 separate (--reviewers=full)]
+```
+
+This makes the umbrella behavior **legible** to the user before the work starts. If they want different routing, they can interrupt and re-run with flags.
 
 ---
 
@@ -86,6 +127,49 @@ Notepads use **APPEND only** — never rewrite a notepad file. The append-only r
 
 ---
 
+## 2.5. Phase A0 — CLAUDE.md / init-deep gate (auto-routing, default ON)
+
+Before any context gathering, check whether the project has documentation agents need:
+
+```
+Bash: test -f CLAUDE.md && echo "root-exists" || echo "root-missing"
+Bash: find . -maxdepth 4 -name CLAUDE.md -type f | head -20
+Bash: test -f AGENTS.md && echo "upstream-agents-md" || true
+```
+
+**Decision matrix:**
+
+| State | Action |
+|---|---|
+| `CLAUDE.md` at root exists | **SKIP** init-deep. Continue to Phase A. |
+| Only `AGENTS.md` present (upstream omo / opencode convention) | Note this in the Routing Decision block. Continue to Phase A — Sisyphus and Prometheus understand AGENTS.md. Recommend (don't force) running init-deep separately. |
+| No `CLAUDE.md` AND no `AGENTS.md` AND `--no-init-deep` not set | Use `AskUserQuestion` to confirm: "No CLAUDE.md found. Run init-deep first (writes a hierarchical CLAUDE.md tree to the repo)? [Yes (recommended) / Skip — proceed without / Just root-level CLAUDE.md, no subdirs]". If user says yes, run init-deep inline below. |
+| `--no-init-deep` flag passed | **DISABLED.** Skip even if absent. |
+
+**Init-deep inline discipline** (when engaged):
+
+```
+# Phase 1 — Discovery in parallel (one message, 6 Task calls)
+Task(subagent_type="omo-explore", prompt="Map project structure: top-level dirs, language, framework, build system. Return absolute paths.")
+Task(subagent_type="omo-explore", prompt="Find entry points: main files, package.json scripts, README files. Return paths + role.")
+Task(subagent_type="omo-explore", prompt="Detect code conventions: naming, formatting, file organization, import style. Cite examples.")
+Task(subagent_type="omo-explore", prompt="Detect anti-patterns: deprecated code, TODO debt, inconsistencies. Cite file:line.")
+Task(subagent_type="omo-explore", prompt="Map build/CI configuration: Makefile, .github/workflows, CI scripts.")
+Task(subagent_type="omo-explore", prompt="Map test patterns: framework, test file conventions, how to run tests.")
+```
+
+If project has >1000 source files OR >5 top-level subdirs that look like distinct modules, add ~1 explore agent per 100 files in distinct sub-modules (cap at +6 additional).
+
+After Phase 1 returns: score each subdir (file count ×3, subdir count ×2, code ratio ×2, unique patterns ×1, module boundary ×2, symbol density ×2, export count ×2, reference centrality ×3). Root always gets a CLAUDE.md. Score >15: write subdir CLAUDE.md. Score 8-15: write only if distinct domain. Score <8: skip.
+
+Write root CLAUDE.md first (50-150 lines, sections: OVERVIEW / STRUCTURE / WHERE TO LOOK / CODE MAP from `git log --since='90 days ago' --name-only --pretty=format: | sort | uniq -c | sort -rn | head -20` / CONVENTIONS / ANTI-PATTERNS / UNIQUE STYLES / COMMANDS / NOTES). Then fire parallel `omo-worker-default` writers — one per subdir flagged, in ONE message — each producing 30-80 line subdir CLAUDE.md files that NEVER repeat root content.
+
+Final pass: `Read` every generated CLAUDE.md, detect placeholder text or duplicate content with root, re-spawn worker if found. Then proceed to Phase A.
+
+> See the standalone `/omo-init-deep` skill for the full discipline; the above is the umbrella's inlined equivalent.
+
+---
+
 ## 3. Phase A — Parallel Context Gathering
 
 **Default behaviour:** fire 1–5 context-gathering agents IN PARALLEL via `Task` calls in ONE message.
@@ -106,7 +190,64 @@ In every other case — including tasks that "seem easy" — bias toward firing 
 
 **Tell the user, before firing:** "Firing N agents in parallel: explore for <X>, librarian for <Y>." That gives them a chance to redirect.
 
-After all agents return, **synthesise findings** into a paragraph or two of plain English. This synthesis becomes the input for Phase B.
+After all agents return, **synthesise findings** into a paragraph or two of plain English. This synthesis becomes the input for Phase A2 / Phase B.
+
+---
+
+## 3.5. Phase A2 — Hyperplan gate (auto-routing, default ON for architectural requests)
+
+After Phase A synthesis, decide whether to insert an adversarial planning pass before Prometheus.
+
+**Engage hyperplan IF any of these is true (and `--no-hyperplan` is not set):**
+
+1. The original request contains (case-insensitive): `architect`, `design`, `migrate`, `refactor`, `redesign`, `rewrite`, `strategy`, `approach`, `trade-off`, `tradeoff`, `pick between`, `choose between`, `should we`, `vs`, `versus`, `replace ... with`, `port ... to`, `consolidate`, `unify`, `extract`, `split into`.
+2. Phase A research returned findings spanning >3 high-impact subsystems (you judged this from the synthesis).
+3. User passed `--hyperplan` explicitly.
+
+**Disable hyperplan IF:**
+
+- `--no-hyperplan` was passed.
+- `--minimal` was passed.
+- The request is unambiguously implementation-level (e.g., "rename X to Y", "fix bug N", "add field F to model M"). Skip hyperplan; go straight to Prometheus.
+
+**Hyperplan inline discipline** (when engaged):
+
+Run 2 rounds by default on Opus 4.8; 3 rounds if `--rounds=3`. The 5 critics are fixed: `omo-skeptic` (anti-over-engineering), `omo-validator` (completeness/blast-radius), `omo-researcher` (cite-or-retract), `omo-architect` (separation-of-concerns), `omo-creative` (orthodoxy).
+
+```
+# Round 1 — Independent analysis (one message, 5 parallel Task calls)
+Task(subagent_type="omo-skeptic",   prompt="<hyperplan-round-1-task>\nContext from Phase A: <synthesis>\nUser request (verbatim): <request>\n\nProduce numbered findings (max 8). Each ≤3 sentences. Default position: REJECT and demand simpler. No prose paragraphs.")
+Task(subagent_type="omo-validator", prompt="<hyperplan-round-1-task>\n... same shape ...")
+Task(subagent_type="omo-researcher",prompt="<hyperplan-round-1-task>\n... cite file:line for every claim, demand evidence ...")
+Task(subagent_type="omo-architect", prompt="<hyperplan-round-1-task>\n... attack leaky abstractions, demand SIMPLICITY ...")
+Task(subagent_type="omo-creative",  prompt="<hyperplan-round-1-task>\n... attack orthodoxy, propose 3+ alternatives ...")
+```
+
+[await all 5]
+
+```
+# Round 2 — Cross-attack (one message, 5 parallel Task calls)
+# Each critic receives the OTHER FOUR critics' Round 1 findings and attacks them ruthlessly.
+Task(subagent_type="omo-skeptic",   prompt="<hyperplan-round-2-task>\nThe other critics' Round 1 findings: <other 4 findings>\n\nAttack their findings. Be ruthless. Cite which specific findings you're attacking and what's wrong.")
+Task(subagent_type="omo-validator", prompt="<hyperplan-round-2-task>\n... same shape, attack from validator angle ...")
+# ... etc for researcher, architect, creative
+```
+
+[await all 5]
+
+**If `--rounds=3` (opt-in on 4.8, default on 4.7):** Round 3 reorganises Round 2 attacks BY ORIGINAL FINDING. Each critic gets only attacks landed on their OWN Round 1 findings and is told to defend, refine, or concede.
+
+**Distillation (you, the orchestrator, NOT the critics):** read all returns and reduce into a 4-bucket bundle:
+- **Hard Constraints** — non-negotiables surviving all rounds
+- **Decisions** — judgment calls with rationale and one chosen option per
+- **Risks & Mitigations** — each risk paired with a concrete mitigation
+- **Open Questions** — still genuinely contested; surface to user via `AskUserQuestion` before Prometheus
+
+This bundle becomes the input for Phase B. **You do NOT write the plan yourself.** Prometheus owns plan generation; hyperplan owns insight distillation.
+
+Save the debate transcript to `.omo/hyperplan/<ISO-timestamp>/transcript.md` (Round 1 + Round 2 + Round 3-if-used + distilled bundle + plan link once Prometheus completes).
+
+> See the standalone `/omo-hyperplan` skill for the full discipline; the above is the umbrella's inlined equivalent.
 
 ---
 
@@ -117,8 +258,10 @@ After all agents return, **synthesise findings** into a paragraph or two of plai
 Fire:
 
 ```
-Task(subagent_type="omo-prometheus", prompt="<Phase A synthesis>\n\n<original user request>\n\nProduce a plan at .omo/plans/<name>.md. Plan name: <derived-name>.")
+Task(subagent_type="omo-prometheus", prompt="<Phase A synthesis>\n\n[IF Phase A2 ran:] HYPERPLAN BUNDLE (use as planning input):\nHard Constraints: <list>\nDecisions: <list>\nRisks & Mitigations: <list>\nOpen Questions resolved: <list>\n\n<original user request>\n\nProduce a plan at .omo/plans/<name>.md. Plan name: <derived-name>.")
 ```
+
+When Phase A2 (hyperplan) engaged, the distilled bundle goes into the Prometheus prompt **as authoritative constraints** — Prometheus should treat Hard Constraints as immovable, accept the Decisions, fold in the Risks/Mitigations, and skip questions on anything already resolved in Open Questions. This is the load-bearing handoff that turns hyperplan from "five critics yelling" into "a plan that's already been beaten on."
 
 Prometheus runs in **interview mode** by default. It will either:
 
@@ -330,6 +473,101 @@ Every behavior-changing task — features, fixes, refactors, perf, glue, config-
 
 **Never** silently retry without telling Oracle / the user. Never delete or `.skip` failing tests to force-pass.
 
+### 9.1 Ralph-loop wrap (opt-in via `--loop`)
+
+If `--loop` was passed, the entire Phase D wave-by-wave execution is wrapped in a convergence loop with a max-iteration cap (default 10). Behavior:
+
+- Each iteration runs one full Phase D pass.
+- After Phase D, you check: are all `## TODOs` checkboxes flipped `- [x]`?
+- If YES: emit `<promise>WAVE_COMPLETE</promise>` and exit the loop. Continue to Phase D5.
+- If NO: increment iteration counter, re-enter Phase D with the unfinished tasks. Use the `omo-ralph-loop` state file at `.omo/ralph-loop.local.md` to persist iteration count and prior-attempt notes.
+- At max iterations: stop and consult `omo-oracle` with the full iteration log. Oracle's verdict drives final disposition (continue past cap with documented justification / hand back to user / mark as blocked).
+
+The wrap is **off by default** because most ultrawork runs converge in one Phase D pass — wrapping in a loop adds overhead. Use `--loop` for genuinely hairy work where you expect multiple attempts.
+
+If `--loop` is not set: Phase D runs once. If anything fails after the standard 3-attempt budget (see §9), escalate to Oracle, then to the user. No silent re-loop.
+
+---
+
+## 9.5. Phase D5 — Security audit gate (auto-routing, default ON when diff is sensitive)
+
+After Phase D completes and BEFORE Phase E, scan the diff for security-sensitive paths. If matched, run a security-research pass inline.
+
+**Diff scan:**
+
+```
+Bash: BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo main)
+Bash: git diff --name-only $(git merge-base $BASE HEAD)..HEAD
+```
+
+**Sensitive-path globs** (case-insensitive substring match against the changed-files list):
+
+`auth`, `authn`, `authz`, `oauth`, `jwt`, `session`, `login`, `signup`, `password`, `token`, `secret`, `credential`, `cors`, `csrf`, `rls`, `policies`, `middleware`, `crypto`, `hash`, `sign`, `verify`, `permission`, `role`, `tenant`, `isolation`, `webhook`, `api/`, `routes/`, `endpoints/`, `.env`, `vault`, `keychain`, `keystore`
+
+Plus: any file whose path matches the project's auth/security modules as discovered in Phase A.
+
+**Decision:**
+
+| Condition | Action |
+|---|---|
+| `--no-security` was passed OR `--minimal` was passed | **DISABLED.** Skip Phase D5. |
+| Diff matches one or more sensitive paths | **ENGAGE.** Run security-research discipline inlined below. |
+| Diff is empty (Phase D made no file changes) | **SKIP.** Nothing to audit. |
+| Diff is non-empty but no sensitive matches | **SKIP** by default. Note "no sensitive paths touched" in the routing log. If `--security` was explicitly passed, force-engage. |
+| Prometheus's plan explicitly flagged "security review required" | **FORCE-ENGAGE** regardless of diff scan. |
+
+**Security-research inline discipline** (when engaged):
+
+```
+# Round 1 — Hunter pass (one message, 3 parallel Task calls)
+Task(subagent_type="omo-surface-hunter",        prompt="<scope: diff or paths>\nMap attack surface: entry points, trust boundaries, attacker-controlled inputs, data sinks, privilege transitions, sensitive assets. Return file paths + exact functions. NO severity unless you name an attack path. Write findings to .omo/security-research/<TS>/surface-hunter.md.")
+Task(subagent_type="omo-auth-data-hunter",      prompt="<scope>\nHunt auth, authz, tenant isolation, injection, SSRF, credential exposure, confused-deputy. Return ONLY findings with concrete exploit preconditions + CWE candidates + verification steps. Write to .omo/security-research/<TS>/auth-data-hunter.md.")
+Task(subagent_type="omo-runtime-supply-hunter", prompt="<scope>\nHunt fs, subprocess, archive, dependency, hook execution, MCP, config, env-var risks. Check path traversal, command injection, unsafe downloads, permission boundaries, supply-chain. Cite file paths AND verification commands. Write to .omo/security-research/<TS>/runtime-supply-hunter.md.")
+```
+
+[await all 3]
+
+```
+# Round 2 — PoC pass (one message, 2 parallel Task calls)
+Task(subagent_type="omo-poc-engineer-a", prompt="Candidate findings from hunters: <hunters' outputs>\nBuild minimal safe PoCs for each. Toy inputs, local-only execution. Prove or disprove exploitability — DO NOT broaden scope. Write PoCs to .omo/security-research/<TS>/poc-a/. NEVER run destructive exploits against real services.")
+Task(subagent_type="omo-poc-engineer-b", prompt="Candidate findings: <hunters' outputs>\nIndependently REPRODUCE candidates and try to FALSIFY them. Downgrade anything without a working path. Use a different harness/angle than Engineer A. Write to .omo/security-research/<TS>/poc-b/. If unsafe to run live, design a safe static/dry-run proof.")
+```
+
+[await both]
+
+**Cross-check (you):** for each candidate finding, was it proved by Engineer A? Was it falsified by Engineer B? Assign severity per CVSS v4.0 only when both attack-path AND impact are concrete. "No severity without an attack path" is invariant.
+
+**Report:** write `.omo/security-research/<TS>/report.md` with verdict (PASS / PASS WITH FINDINGS / BLOCK), findings table, downgraded candidates, residual risk. If verdict is **BLOCK** — a critical exploitable finding — pause the ultrawork run, present the report, and require user confirmation before continuing to Phase E. If verdict is **PASS** or **PASS WITH FINDINGS** — continue to Phase D7.
+
+> See the standalone `/omo-security-research` skill for the full discipline; the above is the umbrella's inlined equivalent.
+
+---
+
+## 9.7. Phase D7 — AI-slop cleanup (auto-routing, default ON)
+
+After Phase D5 (or directly after Phase D if D5 was skipped), run a slop-detection pass on the changed files unless `--no-slop-check` or `--minimal` was passed.
+
+**Scope:** the boulder's changed files (`git diff --name-only $(git merge-base $BASE HEAD)..HEAD`), filtered to code extensions (`*.ts *.tsx *.js *.jsx *.py *.go *.rs *.swift *.kt *.java *.rb *.php *.c *.cpp *.h *.cs *.scala`), excluding `node_modules/`, `dist/`, `build/`, `.next/`, `.omo/`, anything matching `*.lock` / `*.json` / `*.yaml` / `*.toml` / `*.md`.
+
+**Pre-flight safety:** before any worker edits a file, save the pre-modification content to `.omo/ai-slop-runs/<ISO-timestamp>/originals/<flat-path>`. This is the rollback artifact. Do NOT use `git checkout --` to revert — it would discard unrelated branch changes.
+
+**Per-file fan-out:** in ONE message, spawn up to 20 parallel `Task(subagent_type="omo-worker-quick", ...)` calls (cap at 20 for safety; if there are more files, batch). Each worker gets the full slop discipline inlined in its prompt:
+
+- 3 detection categories: (A) obvious comments / restating-the-code / filler / decorative separators / TODO without context / contradictory comments; (B) over-defensive code (null checks on non-null types, try/catch around code that can't throw, optional chaining on non-nullable); (C) spaghetti nesting that early-return would flatten.
+- KEEP: BDD comments (`# given/when/then`), ticket links, WHY rationale, type-assertion justifications, license headers, public-API JSDoc on exported functions, validation at system boundaries, error handling for I/O, auth/authz/audit checks.
+- 6 safety rules: never remove I/O error handling, never simplify user-input validation, never remove comments with ticket numbers / URLs / WHY, never remove auth checks, never refactor across function boundaries (this is cleanup, not architecture), never remove TODOs with assignees/context.
+- 4-step process: read & analyze full file → safety-impact consideration → execute Edits → return structured report (file / removed / kept-for-safety / risks).
+
+**Critical review (you, after all workers return):**
+
+1. Safety scan: did any worker delete `try`/`catch`/`fs.read`/`fs.write`/`fetch`/`spawn` lines? If yes → `Read` that file, restore from `.omo/ai-slop-runs/<TS>/originals/` if removal was unsafe.
+2. Behavior scan: did any worker rename functions, change signatures, or alter exports? Out of scope for slop cleanup → restore.
+3. Quality scan: are the per-file rationales coherent? If a worker's report says "removed X" but the diff shows Y, that's a sign of confusion → restore.
+
+Append summary to the boulder notepad at `.omo/notepads/<plan-name>/learnings.md`: total files cleaned, total items removed, total kept-for-safety, rollback dir path.
+
+> See the standalone `/omo-remove-ai-slops` skill for the full discipline; the above is the umbrella's inlined equivalent.
+
 ---
 
 ## 10. Phase E — Final Verification Wave
@@ -457,12 +695,28 @@ If the session is using Opus 4.7 (not 4.8) OR the user explicitly asked for `--r
 [ULTRAWORK MODE ENABLED]
         │
         ▼
+[ROUTING DECISION emitted]  (init-deep? hyperplan? security? slop? loop? reviewers?)
+        │
+        ▼
+[A0] Phase A0 — CLAUDE.md / init-deep gate  (default ON if no CLAUDE.md)
+     no CLAUDE.md → AskUserQuestion → if yes, 6 parallel omo-explore + scored writes
+     CLAUDE.md present → SKIP
+        │
+        ▼
 [A] Phase A — Parallel context gathering
     Task(omo-explore) × N, Task(omo-librarian) × M  ── one message ──┐
                                                                       │
         ▼ synthesise findings                                         │
+[A2] Phase A2 — Hyperplan gate  (default ON for architectural triggers)
+     architectural request OR >3 subsystems OR --hyperplan?           │
+     YES → Round 1 (5 critics × parallel) → Round 2 (cross-attack)    │
+           → [optional Round 3 if --rounds=3] → distill bundle        │
+     NO  → SKIP, pass synthesis straight to Prometheus                │
+        │                                                             │
+        ▼                                                             │
 [B] Phase B — Mandatory Prometheus handoff                           │
     Task(omo-prometheus) ─ interview loop ─ writes .omo/plans/<name>.md
+    + hyperplan bundle (if A2 ran) as authoritative input             │
         │                  ↑                                          │
         │   AskUserQuestion │ (only when Prometheus asks)             │
         ▼                                                             │
@@ -472,6 +726,7 @@ If the session is using Opus 4.7 (not 4.8) OR the user explicitly asked for `--r
         │                                                             │
         ▼                                                             │
 [D] Phase D — Wave-by-wave execution                                  │
+    [optionally wrapped in ralph-loop convergence if --loop]          │
     for each wave:                                                    │
       Task(omo-worker-*) × K  ── one message ──                       │
       for each completion:                                            │
@@ -482,6 +737,19 @@ If the session is using Opus 4.7 (not 4.8) OR the user explicitly asked for `--r
         Edit plan: [ ] → [x]                                          │
         Edit notepad (append learnings)                               │
     failure → re-dispatch with concatenated context (max 3) → Oracle  │
+        │                                                             │
+        ▼                                                             │
+[D5] Phase D5 — Security audit  (default ON if diff matches sensitive paths)
+     diff scan → if sensitive: Round 1 (3 hunters × parallel) →       │
+                  Round 2 (2 PoC engineers × parallel) → cross-check  │
+                  → report. BLOCK verdict pauses for user confirm.    │
+     not sensitive OR --no-security → SKIP                            │
+        │                                                             │
+        ▼                                                             │
+[D7] Phase D7 — AI-slop cleanup  (default ON unless --no-slop-check)  │
+     save pre-mod originals to .omo/ai-slop-runs/<TS>/originals/      │
+     per-file parallel omo-worker-quick (cap 20) with slop discipline │
+     post-check: revert any unsafe deletions from originals dir       │
         │                                                             │
         ▼                                                             │
 [E] Phase E — Final Verification Wave                                 │
@@ -496,6 +764,8 @@ If the session is using Opus 4.7 (not 4.8) OR the user explicitly asked for `--r
 [F] Phase F — Boulder closeout                                        │
     AskUserQuestion: okay to close?                                   │
     On okay: Write .omo/boulders/<TS>/summary.md                      │
+              with links to plan, hyperplan transcript (if any),      │
+              security report (if any), slop-run dir, F.V.W. verdicts │
     Final message: "Boulder closed."                                  │
         │                                                             │
         ▼                                                             ▼

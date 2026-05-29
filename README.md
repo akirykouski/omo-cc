@@ -36,25 +36,47 @@ After installing, from any Claude Code session:
 /omo-ultrawork "fix the login bug"
 ```
 
-That launches the full omo workflow:
+`/omo-ultrawork` is the **umbrella workflow**. By default it auto-routes through every relevant omo skill based on the request and the diff. The full sequence:
 
-1. Sisyphus (orchestrator) fans out parallel `omo-explore` / `omo-librarian` Tasks to gather context.
-2. Mandatory handoff to `omo-prometheus` (planner) — interview mode if the request has ambiguity, plan-generation mode if it doesn't.
-3. Prometheus writes a plan to `.omo/plans/<name>.md` with parallel-execution waves, per-task acceptance criteria, and QA scenarios.
-4. Sisyphus executes waves in parallel via worker agents (`omo-worker-quick`, `-deep`, `-ultrabrain`, `-visual`, `-artistry`, `-default`).
-5. Per-task verification: typecheck + read every changed file + hands-on QA for user-facing changes.
-6. Final Verification Wave: 2–3 parallel reviewers (`omo-oracle` runs a merged plan-compliance + scope-fidelity rubric; `omo-worker-ultrabrain` does code quality; `omo-worker-default` does manual QA when user-facing surfaces changed). All must approve.
-7. Boulder closeout at `.omo/boulders/<ts>/summary.md`.
+1. **Routing decision** — emits a block listing which sub-skills will engage and why, so you see the plan before work starts.
+2. **Phase A0 — init-deep gate** (if no `CLAUDE.md` at root): asks to map the codebase first via 6 parallel `omo-explore` agents, then writes a hierarchical `CLAUDE.md` tree.
+3. **Phase A — context gathering**: parallel `omo-explore` + `omo-librarian` Tasks.
+4. **Phase A2 — hyperplan gate** (if request mentions architecture/design/migrate/refactor/strategy/trade-off OR >3 high-impact subsystems): 5 hostile critics × 2 rounds (3 if `--rounds=3`) → distilled bundle fed into Prometheus as authoritative constraints.
+5. **Phase B — Prometheus handoff**: interview mode → writes `.omo/plans/<name>.md` with parallel-execution waves, per-task acceptance criteria, and QA scenarios.
+6. **Phase C — plan parsing**: build wave dependency map, optional Momus pre-flight.
+7. **Phase D — wave execution**: parallel `omo-worker-*` per wave; per-task typecheck + diff read + hands-on QA + plan checkbox flip. Optional `--loop` wraps Phase D in convergence loop.
+8. **Phase D5 — security audit gate** (if diff touches `**/auth/**`, `**/api/**`, `**/middleware/**`, `**/.env*`, etc.): 3 hunters + 2 PoC engineers in parallel → severity-calibrated report. BLOCK verdict pauses for your confirmation.
+9. **Phase D7 — slop cleanup**: per-file parallel `omo-worker-quick` with `omo-remove-ai-slops` discipline; pre-modification originals saved to `.omo/ai-slop-runs/<ts>/originals/` for rollback.
+10. **Phase E — Final Verification Wave**: 2–3 parallel reviewers (`omo-oracle` runs merged plan-compliance + scope-fidelity rubric; `omo-worker-ultrabrain` does code quality; `omo-worker-default` does manual QA when user-facing). All must approve.
+11. **Phase F — boulder closeout**: `.omo/boulders/<ts>/summary.md` with links to plan, hyperplan transcript, security report, slop-run dir, F.V.W. verdicts.
 
-For lower-stakes work, you can call sub-skills directly:
+### Umbrella flags
+
+| Flag | Effect |
+| --- | --- |
+| `--minimal` | Disable all auto-routing. Run the v1 backbone only: A → B → C → D → E → F. No init-deep, hyperplan, security-research, slop-check, or loop wrap. |
+| `--no-init-deep` | Skip Phase A0 even if no `CLAUDE.md` exists. |
+| `--no-hyperplan` | Skip Phase A2 even on architectural requests. |
+| `--no-security` | Skip Phase D5 even if diff is sensitive. |
+| `--no-slop-check` | Skip Phase D7. |
+| `--loop` | Wrap Phase D in a convergence loop (max 10 iterations default). |
+| `--rounds=3` | Force 3-round hyperplan instead of 2 (default on Opus 4.7). |
+| `--reviewers=full` | Use v1's 4-reviewer F.V.W. (F1 + F2 + F3 + F4 separate) instead of v2's merged F1+F4 + F2 + conditional F3. |
+| `--hyperplan` | Force-engage hyperplan even without architectural triggers. |
+| `--security` | Force-engage security-research even when diff isn't sensitive. |
+
+### Standalone sub-skills
+
+Each sub-skill is also directly invokable for narrower workflows:
 
 ```
-/omo-hyperplan "should we migrate from Stripe to Paddle?"
-/omo-security-research "audit supabase/functions/process-trade-in"
-/omo-init-deep
-/omo-remove-ai-slops --scope=branch
-/omo-ralph-loop "rename foo to bar across all .ts files"
-/omo-start-work my-plan-name --worktree ../my-worktree
+/omo-hyperplan "should we migrate from Stripe to Paddle?"   # adversarial planning only
+/omo-security-research "audit supabase/functions/..."        # security audit only
+/omo-init-deep                                                # generate CLAUDE.md tree only
+/omo-remove-ai-slops --scope=branch                           # slop cleanup only
+/omo-ralph-loop "rename foo to bar across all .ts files"     # convergence loop only
+/omo-start-work my-plan-name --worktree ../my-worktree        # resume an existing plan
+/omo-ultrawork "<task>" --minimal                             # ultrawork backbone (v1 behavior)
 ```
 
 ## Pairing with Dynamic Workflows (Claude Code 2.1.154+)
